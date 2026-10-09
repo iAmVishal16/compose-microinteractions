@@ -34,7 +34,7 @@ dampingRatio = dampingFraction
 
 An `interpolatingSpring(stiffness:damping:)` converts as `dampingRatio = damping / (2 * sqrt(stiffness))`.
 
-The rows below are the `swiftui-microinteractions` presets, by the same names, run through that formula. Use these names in prompts and comments so a demo ported either way keeps its feel — earlier versions of this table were roughly 1.5× stiffer than the iOS values they claimed to match.
+The rows below are the `swiftui-microinteractions` presets, by the same names, run through that formula. Use these names in prompts and comments, so a demo ported either way keeps its feel.
 
 | Feel | Compose spec | iOS preset |
 |---|---|---|
@@ -47,11 +47,11 @@ The rows below are the `swiftui-microinteractions` presets, by the same names, r
 | Dial / scrub | `spring(dampingRatio = 0.70f, stiffness = 439f)` | `.interactiveSpring(response: 0.3, dampingFraction: 0.7)` |
 | Screen transition | `spring(dampingRatio = 1f, stiffness = 247f)` | `.spring(response: 0.4, dampingFraction: 1.0)` |
 
-`Screen transition` is critically damped on purpose — see *Judging It*. Where a value is close to a built-in (`Spring.StiffnessLow` = 200f, `Spring.StiffnessMediumLow` = 400f, `Spring.DampingRatioNoBouncy` = 1f) either is fine; the explicit float is what matches iOS.
+`Screen transition` is critically damped on purpose — see *Generation Defaults*. Where a value is close to a built-in (`Spring.StiffnessLow` = 200f, `Spring.StiffnessMediumLow` = 400f, `Spring.DampingRatioNoBouncy` = 1f) either is fine; the explicit float is what matches iOS.
 
-Never write a bare `spring()`. If the user supplies values, use them verbatim. Map feel words: "stretchy" → Snap/bounce, "snappy" → UI pop, "melts" → Slow morph.
+Never write a bare `spring()`. If the user supplies values, use them verbatim. Map feel words as the iOS vocabulary table does: "stretchy" / "rubber" / "wobbly" → the two-spring *Rubber-Band Selection Indicator*, not a single preset; "snappy" → UI pop; "melts" → Slow morph.
 
-Keep each tuple as a named constant in the file so it can be tuned in one place.
+Keep each tuple as a named constant so it can be tuned in one place — including in the recipes below. A value that is **not** in the table above needs a constant *and* a one-line comment saying why it is off-table; otherwise it reads as a preset someone forgot to use.
 
 **Which API:**
 - `animateFloatAsState` / `animateColorAsState` / `animateDpAsState` — the value follows a target (declarative, like `.animation(value:)`).
@@ -62,7 +62,7 @@ Keep each tuple as a named constant in the file so it can be tuned in one place.
 
 ## Derive, Don't Animate Alongside
 
-**Two animations for one event always desync**, and that desync is what makes motion feel **unglued** — a card caught tilted at an angle that doesn't match where it is, a squash that outlasts the motion that caused it. (Not "rubbery": rubber-band is a compliment in this skill, see *Rubber-Band Selection Indicator*.)
+**Two animations for one event always desync**, and that desync is what makes motion feel **unglued** — a card caught tilted at an angle that doesn't match where it is, a squash that outlasts the motion that caused it. (**Rubber-band** is something else entirely, and a compliment: see *Rubber-Band Selection Indicator*.)
 
 If a second property follows from the first, **compute it — never animate it**:
 
@@ -79,11 +79,20 @@ The rubber-band tab bar below is the one case where two animations are right —
 **Corollary — only when position has several sources.** Prefer the velocity you are already given: `Animatable.velocity` is exact for a spring, and a drag already has `VelocityTracker`. Differentiate position yourself only when a finger, a spring, a fling *and* a clamp all move the same thing and none of them knows about the others. Then do it properly, or it is noise:
 
 ```kotlin
-// In the frame loop — real dt from the frame clock, and smoothed.
+private const val VELOCITY_SMOOTHING_SECONDS = 0.03f
+
+// In the frame loop — real dt from the frame clock.
 val dt = (now - previousFrame) / 1_000_000_000f
-val instant = (position - lastPosition) / dt
-velocity += (instant - velocity) * 0.35f   // one jittery frame must not become a throw
+if (dt > 0f) {                                  // a zero dt would divide by zero
+    val instant = (position - lastPosition) / dt
+    // Frame-rate independent: a fixed factor like 0.35f runs twice as often at 120Hz and so
+    // converges twice as fast in wall-clock time. Express the smoothing as a time constant.
+    val alpha = 1f - exp(-dt / VELOCITY_SMOOTHING_SECONDS)
+    velocity += (instant - velocity) * alpha    // one jittery frame must not become a throw
+}
 ```
+
+The same applies to **any** per-frame chase — a knob following a finger, a stir point, a camera. `value += (target - value) * K` is wrong at any refresh rate but 60Hz; `1f - exp(-dt / tau)` is right at all of them. To port an existing `K` without changing the feel: `tau = -(1f / 60f) / ln(1f - K)`.
 
 ---
 
@@ -124,11 +133,9 @@ Custom-styled surfaces use `clickable(interactionSource = remember { MutableInte
 
 ## Haptics
 
-`View.performHapticFeedback` via `LocalView.current` works from API 24 and respects the user's system haptic setting. Wrap it as a ladder that mirrors the iOS one:
-
 **Check the project first.** Search for an existing `rememberHaptics()` / `Haptics` before declaring one — every demo redeclaring it is a build error, not a duplicate.
 
-The rungs are named after the iOS ladder, *not* after what the Android constant is called. Someone porting a demo calls `selection()` for a scrub step and must get a scrub step:
+`View.performHapticFeedback` via `LocalView.current` works from API 24 and respects the user's system haptic setting. The rungs are named after the iOS ladder, *not* after what the Android constant is called — someone porting a demo calls `selection()` for a scrub step and must get a scrub step:
 
 ```kotlin
 class Haptics(private val view: View) {
@@ -144,8 +151,6 @@ fun rememberHaptics(): Haptics {
     return remember(view) { Haptics(view) }
 }
 ```
-
-`View.performHapticFeedback` via `LocalView.current` works from API 24 and respects the user's system haptic setting.
 
 ### When to add haptics vs. skip
 
@@ -166,7 +171,7 @@ if (!fused && strength > 0.55f) { fused = true;  haptics.medium() }
 else if (fused && strength < 0.45f) { fused = false }
 ```
 
-  If a dead band genuinely doesn't fit the quantity, debounce instead — but measure it in **milliseconds**, never frames.
+If a dead band genuinely doesn't fit the quantity, debounce instead — but measure it in **milliseconds**, never frames.
 
 ---
 
@@ -216,14 +221,16 @@ private fun soften(source: Bitmap, passes: Int): Bitmap {
 
 **A heavy blur will band.** Blurred means nearly flat, and a nearly flat gradient written at eight bits a channel rounds whole regions to one level; the boundaries appear as contour lines tracing the image underneath. **Blurring harder makes it worse.** Two fixes, either or both:
 
-- Dither with noise smaller than one output level — **±0.5/255**, i.e. `(hash(coord) - 0.5) * (1.0 / 255.0)` in a shader, or a tiled noise layer at ~3.5% alpha over the panel.
+- Dither with noise smaller than one output level — **±0.5/255**, i.e. `(hash(coord) - 0.5) * (1.0 / 255.0)` in a shader. A tiled noise layer must match that budget: full-range noise at 3.5% alpha shifts pixels by about ±4.5 levels, which is visible grain, not dither. Either keep the tile low-contrast (mid-grey ±2) or drop the alpha to about **0.4%**. Grain heavy enough to see is a texture choice — fine, but say so, and don't call it dither.
 - Let a little of the sharp image through — **8–12%**. Real frosted glass is not a perfect diffuser either, and the direct component carries the fine detail that rides over the steps.
 
 **Keep scrims off a frosted panel.** A gradient dark enough to make white type readable over a bright backdrop is dark enough to *see*, and then the panel is no longer glass — it is a tinted rectangle with frost at the top. Put the contrast on the glyphs (`TextStyle(shadow = Shadow(...))`).
 
 This is scoped to the panel itself. A scrim **over a full-bleed blurred backdrop** is correct and the iOS skill prescribes it (black 0.55 → clear → 0.70). The rule is: scrim the backdrop, never the glass.
 
-**Give the pane thickness.** Frosted glass does not blur to its edge — the last few millimetres are a curved shoulder that refracts, gathering what lies just *outside* the panel into a bright lip. A blur can never produce that (a blur mixes pixels where they are; refraction fetches them from elsewhere), and it is most of what makes a pane read as a physical object. A signed-distance function for a rounded box gives both the distance to the rim and, through its gradient, the direction to bend in.
+**Give the pane an edge.** Frosted glass does not blur flat to its border; the rim catches light. A lit top bevel and a shaded bottom one — a single `drawRoundRect` with a vertical-gradient `Stroke` — is most of what gives a panel thickness, and it costs nothing at any API level.
+
+A rim that genuinely *refracts* (gathering what lies just outside the panel into a bright lip) needs `RuntimeShader`, which is API 33+ — and this section recommends the small-decode blur precisely because it works below API 31. That recipe is deferred to v1.2 with the rest of the shader material, rather than stated here without a snippet or a floor.
 
 ---
 
@@ -231,12 +238,12 @@ This is scoped to the panel itself. A scrim **over a full-bleed blurred backdrop
 
 A knob you drag sideways to step a value, hold at the edge to auto-repeat, pull down to reveal a secondary action, and release to spring back.
 
-- **One `Animatable<Offset>`** for the knob position; on release `animateTo(Offset.Zero, spring(0.58f, 170f))`.
+- **One `Animatable<Offset>`** for the knob position; on release `animateTo(Offset.Zero, PHYSICS_SETTLE)` — the *Physics settle* preset, `spring(0.70f, 195f)`.
 - **Lock the drag direction** after ~2dp of travel. `detectDragGestures` reports both axes, so without a lock a sideways drag also starts the pull-down action.
 - **Rubber-band, don't hard-clamp.** Scale the drag delta by a resistance that falls toward the limit: `resistance = (1f - abs(current.x) / limitX).coerceAtLeast(0f)`, then `snapTo(current + delta * resistance)`. The knob feels elastic and still springs back.
 - **Hold-at-edge auto-repeat** = `derivedStateOf { abs(offset.value.x) >= edgePx }` + `LaunchedEffect(heldAtEdge)` loop (see Effects as timers).
 - Position the knob with `Modifier.offset { }` (lambda), never the `Dp` overload.
-- Haptic: `tick()` per step, `medium()` on clear/commit.
+- Haptic: `selection()` per step, `medium()` on clear/commit.
 
 ---
 
@@ -244,18 +251,28 @@ A knob you drag sideways to step a value, hold at the edge to auto-repeat, pull 
 
 A flat slide animates **one** offset. A liquid indicator animates its **two edges on two springs**.
 
-1. Both edges target `selectedIndex.toFloat()`, but with different springs: a stiff **lead** (`0.75f / 700f`) and a soft **lag** (`0.60f / 190f`).
+1. Both edges target `selectedIndex.toFloat()`, but with different springs: a stiff **lead** and a soft **lag**. Neither is a preset, on purpose — the whole effect is the *gap* between them, so they are tuned as a pair:
+
+```kotlin
+// Deliberately off-table. The lead must outrun every preset for the pill to stretch at all,
+// and the lag must be slacker than Physics settle for the gap to stay open long enough to see.
+private val PILL_LEAD = spring<Float>(dampingRatio = 0.75f, stiffness = 700f)
+private val PILL_LAG  = spring<Float>(dampingRatio = 0.60f, stiffness = 190f)
+private val LABEL_POP = spring<Float>(dampingRatio = 0.42f, stiffness = 620f) // snappier than any
+                                                                              // preset: a pop that
+                                                                              // settles is not a pop
+```
 2. `left = slot * min(lead, lag)`, `width = slot * (max(lead, lag) - min(lead, lag)) + slot`.
 3. While they desync, the pill spans old → new slot (**stretch**); once both settle it collapses back to one slot. It stretches in the right direction whichever way you tap, and the low-damped lag edge adds a small overshoot.
 4. **Squash while stretched**: `stretch = abs(lead - lag).coerceIn(0f, 1f)`, `scaleY = 1f - stretch * 0.14f`. Stretch without squash reads as a rubber rectangle; with squash it reads as liquid.
-5. **Pop the newly selected label** instead of only recoloring it: `LaunchedEffect(selected) { pop.snapTo(0.82f); pop.animateTo(1f, spring(0.42f, 620f)) }`, applied through `graphicsLayer` to the active label only.
+5. **Pop the newly selected label** instead of only recoloring it: `LaunchedEffect(selected) { pop.snapTo(0.82f); pop.animateTo(1f, LABEL_POP) }`, applied through `graphicsLayer` to the active label only.
 6. Cross-fade label colors with `animateColorAsState` so nothing hard-cuts.
 
 Because the pill's width changes every frame, draw it rather than sizing a `Box`, so the stretch never recomposes:
 
 ```kotlin
-val lead = animateFloatAsState(selected.toFloat(), spring(dampingRatio = 0.75f, stiffness = 700f), label = "lead")
-val lag  = animateFloatAsState(selected.toFloat(), spring(dampingRatio = 0.60f, stiffness = 190f), label = "lag")
+val lead = animateFloatAsState(selected.toFloat(), PILL_LEAD, label = "lead")
+val lag  = animateFloatAsState(selected.toFloat(), PILL_LAG, label = "lag")
 
 Modifier.drawBehind {
     val slot = size.width / tabCount
@@ -308,7 +325,7 @@ val bitmap by produceState<ImageBitmap?>(null, res) {
 bitmap?.let { /* draw it */ } ?: PlaceholderSurface()
 ```
 
-  Shader compilation is the exception: it must happen on the GL/UI thread, so it cannot be moved. Build the shader once in `remember`, keep the `shader == null` path you already need for older API levels, and accept one frame of fallback.
+A `RuntimeShader` can be built off the main thread the same way — its constructor compiles the AGSL source on the CPU and does not need a GL context. What it cannot move is the **GPU pipeline compile**, which happens on the RenderThread the first time the shader is drawn. Budget for one hitch on first draw rather than trying to hoist it, and keep the `shader == null` path you already need for older API levels.
 
 ---
 
