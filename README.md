@@ -25,6 +25,10 @@ Each prompt writes a complete `.kt` file to your project. Supports create and ed
 - A haptic ladder on `View.performHapticFeedback`
 - Draggable value controls: direction lock, rubber-band resistance, auto-repeat, spring-back
 - Rubber-band selection indicators: two edges on two springs, squash, label pop
+- Deriving a second property instead of animating it beside the first
+- Frosted glass without a backdrop-blur API, and the two ways that blur goes wrong
+- Generation defaults: showcase vs. interaction, idle drift, what a glass demo needs behind it
+- Spring presets and a haptic ladder that match `swiftui-microinteractions` name for name
 
 ---
 
